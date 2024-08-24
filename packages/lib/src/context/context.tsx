@@ -3,7 +3,6 @@ import { State, TimeResolution, TWAPContextProps, TwapLibProps } from "../types"
 import defaultTranlations from "../i18n/en.json";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { analytics } from "../analytics";
-import { TWAPLib } from "@orbs-network/twap";
 import { TwapErrorWrapper } from "../ErrorHandling";
 import Web3 from "web3";
 import { query } from "../hooks/query";
@@ -11,7 +10,8 @@ import { LimitPriceMessageContent } from "../components";
 import { defaultCustomFillDelay, MIN_TRADE_INTERVAL_FORMATTED, QUERY_PARAMS } from "../consts";
 import { getQueryParam, limitPriceFromQueryParams } from "../utils";
 import moment from "moment";
-import _ from "lodash";
+import { setWeb3Instance } from "@defi.org/web3-candies";
+import { stateActions } from "./actions";
 analytics.onModuleImported();
 
 export const TwapContext = createContext({} as TWAPContextProps);
@@ -32,35 +32,34 @@ const WrappedTwap = (props: TwapLibProps) => {
   return <TwapErrorWrapper>{props.children}</TwapErrorWrapper>;
 };
 
-const useChainId = (props: TwapLibProps) => {
-  const [chainId, setChainId] = useState<number | undefined>(undefined);
-  const getChain = useCallback(async () => {
-    setChainId(undefined);
-    if (!props.provider) {
-      return;
+const Listener = (props: TwapLibProps) => {
+  const interval = useRef<any>();
+  const { state, updateState } = useTwapContext();
+  const setCustomDuration = stateActions.useSetCustomDuration();
+
+  useEffect(() => {
+    if (props.isLimitPanel) {
+      setCustomDuration({ resolution: TimeResolution.Days, amount: 7 });
+    } else {
+      setCustomDuration(undefined);
     }
-    setChainId(props.connectedChainId || (await new Web3(props.provider).eth.getChainId()));
-  }, [props.connectedChainId, props.provider]);
+  }, [props.isLimitPanel]);
 
   useEffect(() => {
-    getChain();
-  }, [getChain]);
-
-  return chainId;
-};
-
-const useLib = (props: TwapLibProps, isWrongChain?: boolean) => {
-  const lib = useMemo(() => {
-    if (isWrongChain || !props.account || !props.provider || !props.config) return;
-
-    return new TWAPLib(props.config, props.account!, props.provider);
-  }, [isWrongChain, props.config, props.account, props.provider]);
+    if (state.showConfirmation && !state.swapState) {
+      updateState({ confirmationClickTimestamp: moment() });
+      interval.current = setInterval(() => {
+        updateState({ confirmationClickTimestamp: moment() });
+      }, 10_000);
+    }
+    return () => clearInterval(interval.current);
+  }, [state.showConfirmation, state.swapState, updateState]);
 
   useEffect(() => {
-    analytics.onLibInit(lib);
-  }, [lib]);
+    analytics.onLibInit(props.config, props.provider, props.account);
+  }, [props.config, props.provider, props.account]);
 
-  return lib;
+  return null;
 };
 
 export const getInitialState = ({ storeOverride = {}, isQueryParamsEnabled }: { storeOverride?: Partial<State>; isQueryParamsEnabled?: boolean }): State => {
@@ -111,24 +110,11 @@ const useStore = (props: TwapLibProps) => {
   };
 };
 
-const useDeadlineUpdater = (state: State, updateState: (value: Partial<State>) => void) => {
-  const interval = useRef<any>();
-
-  useEffect(() => {
-    if (state.showConfirmation && !state.swapState) {
-      updateState({ confirmationClickTimestamp: moment() });
-      interval.current = setInterval(() => {
-        updateState({ confirmationClickTimestamp: moment() });
-      }, 10_000);
+const useIsWrongChain = (props: TwapLibProps, chainId?: number) => {
+  return useMemo(() => {
+    if (!props.account) {
+      return false;
     }
-    return () => clearInterval(interval.current);
-  }, [state.showConfirmation, state.swapState, updateState]);
-};
-
-export const Content = (props: TwapLibProps) => {
-  const translations = useMemo(() => ({ ...defaultTranlations, ...props.translations }), [props.translations]);
-  const chainId = useChainId(props);
-  const isWrongChain = useMemo(() => {
     if (props.isWrongChain) {
       return true;
     }
@@ -138,18 +124,24 @@ export const Content = (props: TwapLibProps) => {
 
     return chainId !== props.config?.chainId;
   }, [chainId, props.config?.chainId, props.isWrongChain]);
+};
 
-  const lib = useLib(props, isWrongChain);
+export const Content = (props: TwapLibProps) => {
+  const { config } = props;
+  const translations = useMemo(() => ({ ...defaultTranlations, ...props.translations }), [props.translations]);
+  const isWrongChain = useIsWrongChain(props, props.chainId);
   const { updateState, state } = useStore(props);
-  useDeadlineUpdater(state, updateState);
   const uiPreferences = props.uiPreferences || {};
+  const web3 = useMemo(() => (!props.provider ? undefined : new Web3(props.provider)), [props.provider]);
+
+  useEffect(() => {
+    setWeb3Instance(web3);
+  }, [web3]);
 
   return (
     <TwapContext.Provider
       value={{
-        dappProps: props,
         translations,
-        lib,
         isWrongChain,
         state,
         updateState,
@@ -159,10 +151,28 @@ export const Content = (props: TwapLibProps) => {
         dstToken: props.dstToken,
         srcUsd: props.srcUsd || 0,
         dstUsd: props.dstUsd || 0,
+        Components: props.Components,
+        web3,
+        config,
+        account: props.account,
+        onDstTokenSelected: props.onDstTokenSelected,
+        onSrcTokenSelected: props.onSrcTokenSelected,
+        onSwitchTokens: props.onSwitchTokens || (() => {}),
+        isLimitPanel: !!props.isLimitPanel,
+        tokens: props.parsedTokens,
+        maxFeePerGas: props.maxFeePerGas,
+        priorityFeePerGas: props.priorityFeePerGas,
+        askDataParams: props.askDataParams,
+        onTxSubmitted: props.onTxSubmitted,
+        minNativeTokenBalance: props.minNativeTokenBalance,
+        enableQueryParams: props.enableQueryParams,
+        isExactAppoval: props.isExactAppoval,
+        fee: props.fee,
       }}
     >
       <WrappedTwap {...props} />
       <LimitPriceMessageContent />
+      <Listener {...props} />
     </TwapContext.Provider>
   );
 };

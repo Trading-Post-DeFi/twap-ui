@@ -1,6 +1,6 @@
 import React, { useCallback } from "react";
 import { useTwapContext } from "../context/context";
-import { useSetSwapSteps } from "./hooks";
+import { useSetSwapSteps } from "./lib";
 import { query } from "./query";
 
 export function useSubmitOrderButton(onClick?: () => void) {
@@ -19,7 +19,7 @@ export function useSubmitOrderButton(onClick?: () => void) {
   }, [setSwapSteps, onClick]);
 
   return {
-    text: loading ? "Loading..." : t.placeOrder,
+    text: t.placeOrder,
     onClick: _onClick,
     loading,
     disabled: loading || !disclaimerAccepted,

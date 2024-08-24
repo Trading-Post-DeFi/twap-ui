@@ -54,7 +54,7 @@
   "remaining": "Remaining",
   "cancelOrder": "Cancel order",
   "marketOrder": "Market order",
-  "limitOrder": "Limit prder",
+  "limitOrder": "Limit order",
   "limitPrice": "Limit price",
   "marketPrice": "Market price",
   "max": "Max",
@@ -125,5 +125,7 @@
   "individualTradeSize": "Individual trade size",
   "numberOfTrades": "No. of trades",
   "AverageExecutionPrice": "Avg. execution price",
-  "twapMarket": "TWAP-market"
+  "twapMarket": "TWAP-market",
+  "twapMarketOrder": "TWAP-market order",
+  "twapLimit": "dTWAP Limit"
 }

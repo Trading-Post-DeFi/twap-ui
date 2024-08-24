@@ -1,14 +1,23 @@
-import { TWAPLib } from "@orbs-network/twap";
 import { isTxRejected, logger } from "./utils";
 import { v4 as uuidv4 } from "uuid";
-
-require("isomorphic-fetch");
+import { useSwapData } from "./hooks";
+import { Config } from "./types";
 
 const Version = 0.2;
 
 const BI_ENDPOINT = `https://bi.orbs.network/putes/twap-ui-${Version}`;
 
-type Action = "cancel" | "create" | "wrap-only" | "wrap" | "unwrap" | "approve";
+type Action =
+  | "cancel"
+  | "create-order"
+  | "onConfirmationCreateOrderClick"
+  | "onCreateOrderSuccess"
+  | "wrap-only"
+  | "wrap"
+  | "unwrap"
+  | "approve"
+  | "module-imported"
+  | "page-loaded";
 
 interface LibConfig {
   bidDelaySeconds?: number;
@@ -23,24 +32,27 @@ interface LibConfig {
   twapVersion?: number;
 }
 
+type OrderType = "limit" | "twap-market" | "twap-limit";
+
 interface SubmitOrderArgs {
-  fromTokenAddress?: string;
-  toTokenAddress?: string;
-  fromTokenSymbol?: string;
-  toTokenSymbol?: string;
-  fromTokenAmount?: string;
-  fromTokenAmountUi?: string;
-  toTokenAmount?: string;
-  toTokenAmountUi?: string;
-  chunksAmount?: number;
-  minDstAmountOut?: string;
-  minDstAmountOutUi?: string;
+  srcToken?: string;
+  dstToken?: string;
+  srcTokenSymbol?: string;
+  dstTokenSymbol?: string;
+  srcTokenAmount?: string;
+  srcTokenAmountBN?: string;
+  dstTokenAmount?: string;
+  dstTokenMarketAmount?: string;
+  dstTokenMarketAmountBN?: string;
+  totalTrades?: number;
+  minAmountOut?: string;
+  minAmountOutBN?: string;
   deadline?: number;
   deadlineUi?: string;
-  fillDelay?: number;
+  tradeInterval?: number;
   fillDelayUi?: string;
-  srcChunkAmount?: string;
-  srcChunkAmountUi?: string;
+  tradeSize?: string;
+  tradeSizeBN?: string;
 }
 
 interface Data extends SubmitOrderArgs, LibConfig {
@@ -49,8 +61,6 @@ interface Data extends SubmitOrderArgs, LibConfig {
   uiCrashedErrorStack?: string;
   actionError?: string;
   newOrderId?: number;
-  pageLoaded?: boolean;
-  moduleImported?: boolean;
   cancelOrderSuccess?: boolean;
   cancelOrderId?: number;
   action?: Action;
@@ -59,8 +69,9 @@ interface Data extends SubmitOrderArgs, LibConfig {
   wrapTxHash?: string;
   unwrapTxHash?: string;
   approvalTxHash?: string;
-  walletAddress?: string;
   walletConnectName?: string;
+  orderType?: OrderType;
+  maker?: string;
 }
 
 const sendBI = async (data: Partial<Data>) => {
@@ -91,10 +102,6 @@ class Analytics {
       ...values,
     };
 
-    if (process.env.NODE_ENV === "development") {
-      logger(this.data);
-      return;
-    }
     clearTimeout(this.timeout);
     this.timeout = setTimeout(() => {
       sendBI(this.data);
@@ -105,15 +112,12 @@ class Analytics {
     setTimeout(() => {
       this.data = {
         _id: uuidv4(),
-        pageLoaded: true,
-        moduleImported: true,
+        action: "page-loaded",
       };
     }, 1_000);
   }
 
-  onLibInit(lib?: TWAPLib) {
-    const config = lib?.config;
-    const provider = lib?.provider;
+  onLibInit(config?: Config, provider?: any, account?: string) {
     let walletConnectName;
 
     try {
@@ -145,24 +149,40 @@ class Analytics {
       partner: config?.partner,
       twapAddress: config?.twapAddress,
       twapVersion: config?.twapVersion,
-      walletAddress: lib?.maker,
-      pageLoaded: true,
+      maker: account,
       walletConnectName,
+      action: "page-loaded",
     });
   }
 
   onCancelOrder(cancelOrderId: number) {
-    this.updateAndSend({ cancelOrderId });
+    this.updateAndSend({ cancelOrderId, action: "cancel" });
   }
 
   onCancelOrderSuccess() {
     this.updateAndSend({ cancelOrderSuccess: true });
   }
 
-  onSubmitOrder(data: SubmitOrderArgs) {
+  onSubmitOrder(swapData: ReturnType<typeof useSwapData>, orderType: OrderType) {
     this.updateAndSend({
-      ...data,
-      action: "create",
+      srcToken: swapData.srcToken?.address,
+      dstToken: swapData.dstToken?.address,
+      srcTokenSymbol: swapData.srcToken?.symbol,
+      dstTokenSymbol: swapData.dstToken?.symbol,
+      srcTokenAmount: swapData.srcAmount.amountUi,
+      srcTokenAmountBN: swapData.srcAmount.amount,
+      dstTokenMarketAmount: swapData.outAmount.amountUi,
+      dstTokenMarketAmountBN: swapData.outAmount.amount,
+      totalTrades: swapData.chunks,
+      minAmountOut: swapData.dstMinAmount.amountUi,
+      minAmountOutBN: swapData.dstMinAmount.amount,
+      tradeInterval: swapData.fillDelay.millis,
+      deadline: swapData.deadline.millis,
+      deadlineUi: swapData.deadline.text,
+      tradeSize: swapData.srcChunkAmount.amountUi,
+      tradeSizeBN: swapData.srcChunkAmount.amount,
+      action: "onConfirmationCreateOrderClick",
+      orderType,
     });
   }
 
@@ -203,14 +223,17 @@ class Analytics {
     this.updateAndSend({
       newOrderId,
       createOrderTxHash,
+      action: "onCreateOrderSuccess",
     });
     this.reset();
   }
 
   onModuleImported() {
-    this.updateAndSend({
-      moduleImported: true,
-    });
+    this.data = {
+      ...this.data,
+      action: "module-imported",
+    };
+    sendBI(this.data);
   }
 
   onUiCreashed(error: Error) {

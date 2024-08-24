@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { useTwapContext } from "../../context/context";
 import { useSwapModal } from "../../hooks/useSwapModal";
-import { useFormatNumberV2, useIsMarketOrder } from "../../hooks/hooks";
+import { useFormatNumberV2 } from "../../hooks/hooks";
+import { useIsMarketOrder } from "../../hooks/lib";
 
 export const useTokenDisplay = (isSrc?: boolean) => {
   const { outAmount, srcAmount, srcToken, dstToken, srcUsd, dstUsd } = useSwapModal();
@@ -18,15 +19,16 @@ export const useTokenDisplay = (isSrc?: boolean) => {
 };
 
 export const useOrderType = () => {
-  const isLimitPanel = useTwapContext().dappProps.isLimitPanel;
+  const { isLimitPanel, translations: t } = useTwapContext();
   const isMarketOrder = useIsMarketOrder();
+
   return useMemo(() => {
     if (isLimitPanel) {
-      return "Limit";
+      return t.limit;
     }
     if (isMarketOrder) {
-      return "dTWAP Market";
+      return t.twapMarket;
     }
-    return "dTWAP Limit";
-  }, [isLimitPanel, isMarketOrder]);
+    return t.twapLimit;
+  }, [isLimitPanel, isMarketOrder, t]);
 };

@@ -1,12 +1,14 @@
-import { styled } from "@mui/material";
+import { styled } from "styled-components";
 import { ReactNode, useMemo } from "react";
 import { useExplorerUrl, useFormatNumberV2, usemElipsisAddress } from "../hooks/hooks";
 import { StyledColumnFlex, StyledRowFlex, StyledText } from "../styles";
-import { Label, TokenLogo, Tooltip } from "./base";
+import { Label, TokenLogo } from "./base";
 import moment from "moment";
 import { useTwapContext } from "../context/context";
 import { fillDelayText } from "../utils";
 import { Token } from "../types";
+import { Tooltip } from "./Components";
+import { useChunks, useDuration, useFillDelay, useIsMarketOrder } from "../hooks";
 
 const Expiry = ({ deadline }: { deadline?: number }) => {
   const t = useTwapContext()?.translations;
@@ -63,23 +65,17 @@ const ChunksAmount = ({ chunks }: { chunks?: number }) => {
 };
 
 const Recipient = () => {
-  const { translations: t, lib } = useTwapContext();
+  const { translations: t, account } = useTwapContext();
   const explorerUrl = useExplorerUrl();
-  const makerAddress = usemElipsisAddress(lib?.maker);
-
-  const address = (
-    <Tooltip text={lib?.maker} placement="bottom">
-      {makerAddress}
-    </Tooltip>
-  );
+  const makerAddress = usemElipsisAddress(account);
 
   return (
     <DetailRow title={t.recipient}>
       {!explorerUrl ? (
-        address
+        makerAddress
       ) : (
-        <a href={`${explorerUrl}/address/${lib?.maker}`} target="_blank">
-          {address}
+        <a href={`${explorerUrl}/address/${account}`} target="_blank">
+          {makerAddress}
         </a>
       )}
     </DetailRow>
@@ -114,8 +110,15 @@ const DetailRow = ({
 }) => {
   return (
     <StyledDetailRow className={`${className} twap-order-display-details-row`}>
-      <StyledLabel tooltipText={tooltip}>
-        {startLogo} {title}
+      <StyledLabel>
+        <Label.Text
+          text={
+            <>
+              {startLogo} {title}
+            </>
+          }
+        />
+        {tooltip && <Label.Info text={tooltip} />}
       </StyledLabel>
       <StyledDetailRowChildren className="twap-order-display-details-row-right">{children}</StyledDetailRowChildren>
     </StyledDetailRow>
@@ -129,34 +132,32 @@ const TxHash = ({ txHash }: { txHash?: string }) => {
 
   if (!txHash) return null;
 
-  const address = (
-    <Tooltip text={txHash} placement="bottom">
-      {txHashAddress}
-    </Tooltip>
-  );
-
   return (
     <DetailRow title={t.txHash}>
       {!explorerUrl ? (
-        address
+        txHashAddress
       ) : (
         <a href={`${explorerUrl}/tx/${txHash}`} target="_blank">
-          {address}
+          {txHashAddress}
         </a>
       )}
     </DetailRow>
   );
 };
 
-const Details = ({ className = "", children }: { className?: string; children?: ReactNode }) => {
-  return <StyledDetails className={`twap-order-display-details ${className}`}>{children}</StyledDetails>;
+const Details = ({ className = "", children, onClick }: { className?: string; children?: ReactNode; onClick?: () => void }) => {
+  return (
+    <StyledDetails onClick={onClick} className={`twap-order-display-details ${className}`}>
+      {children}
+    </StyledDetails>
+  );
 };
 
 export function OrderDisplay({ children, className = "" }: { children?: ReactNode; className?: string }) {
   return <Container className={`${className} twap-order-display`}>{children}</Container>;
 }
 
-const TokenDisplay = ({ amount, token, usd, title }: { amount?: string; token?: Token; usd?: string; title?: string }) => {
+const TokenDisplay = ({ amount, token, usd, title, content }: { amount?: string; token?: Token; usd?: string; title?: string; content?: ReactNode }) => {
   const _usd = useFormatNumberV2({ value: usd, decimalScale: 2 });
   const _amount = useFormatNumberV2({ value: amount });
 
@@ -168,6 +169,7 @@ const TokenDisplay = ({ amount, token, usd, title }: { amount?: string; token?: 
           {amount ? _amount : ""} {token?.symbol}
         </StyledText>
         {usd && <USD usd={_usd} />}
+        {content}
       </StyledTokenRight>
       <TokenLogo className="twap-order-display-token-usd-logo" logo={token?.logoUrl} />
     </StyledTokenDisplay>
@@ -175,21 +177,51 @@ const TokenDisplay = ({ amount, token, usd, title }: { amount?: string; token?: 
 };
 
 const USD = ({ usd, className = "" }: { usd?: string; className?: string }) => {
-  const { Components } = useTwapContext().uiPreferences;
+  const Components = useTwapContext().Components;
 
   if (Components?.USD) {
-    return <Components.USD usd={usd} />;
+    return <Components.USD value={usd} />;
   }
-  return <StyledText className={`twap-order-display-token-usd ${className}`}>${usd}</StyledText>;
+  return <StyledSmallText className={`twap-order-display-token-usd ${className}`}>${usd}</StyledSmallText>;
 };
 
 const SrcToken = ({ amount, token, usd }: { amount?: string; token?: Token; usd?: string }) => {
-  return <TokenDisplay amount={amount} token={token} usd={usd} title="From" />;
+  const isLimitPanel = useTwapContext().isLimitPanel;
+  return <TokenDisplay amount={amount} token={token} usd={usd} title={isLimitPanel ? "From" : "Allocate"} />;
 };
 
-const DstToken = ({ amount, token, usd }: { amount?: string; token?: Token; usd?: string }) => {
-  return <TokenDisplay amount={amount} token={token} usd={usd} title="To" />;
+const DstToken = ({
+  amount,
+  token,
+  usd,
+  isMarketOrder,
+  fillDelayMillis,
+  chunks,
+}: {
+  amount?: string;
+  token?: Token;
+  usd?: string;
+  isMarketOrder?: boolean;
+  fillDelayMillis?: number;
+  chunks?: number;
+}) => {
+  const t = useTwapContext().translations;
+
+  const content = useMemo(() => {
+    if (!isMarketOrder) return null;
+    return (
+      <StyledSmallText className="twap-small-text">
+        Every {fillDelayText(fillDelayMillis, t).toLowerCase()} Over {chunks} Orders
+      </StyledSmallText>
+    );
+  }, [chunks, isMarketOrder, fillDelayMillis, t]);
+
+  return <TokenDisplay content={content} amount={!isMarketOrder ? amount : ""} token={token} usd={!isMarketOrder ? usd : ""} title={!isMarketOrder ? "To" : "Buy"} />;
 };
+
+const StyledSmallText = styled(StyledText)({
+  fontSize: 14,
+});
 
 const TokensContainer = ({ className = "", children }: { className?: string; children?: ReactNode }) => {
   return <StyledTokens className={`twap-order-display-tokens ${className}`}>{children}</StyledTokens>;
